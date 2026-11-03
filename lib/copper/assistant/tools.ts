@@ -188,6 +188,40 @@ export async function checkAvailability(
   return { status: "ok", product: product.name, colors };
 }
 
+export type ShippingEstimate =
+  | {
+      status: "ok";
+      product: string;
+      colors: {
+        color: string;
+        ships: "now" | "after_restock";
+        shipsAfter: string | null;
+      }[];
+    }
+  | { status: "not_a_color"; product: string; color: string; colors: string[] }
+  | { status: "unavailable"; message: string };
+
+/**
+ * estimate_shipping: when an order for a product color can ship. In stock (or
+ * low stock) ships now; back-ordered ships after the next shipment lands. It
+ * never promises transit days, because the Product Bible has no such policy.
+ */
+export async function estimateShipping(
+  input: CheckAvailabilityInput,
+): Promise<ShippingEstimate> {
+  const result = await checkAvailability(input);
+  if (result.status !== "ok") return result;
+  return {
+    status: "ok",
+    product: result.product,
+    colors: result.colors.map(({ color, stock, restockDate }) => ({
+      color,
+      ships: stock === "backordered" ? "after_restock" : "now",
+      shipsAfter: stock === "backordered" ? restockDate : null,
+    })),
+  };
+}
+
 export const copperTools: ToolSet = {
   get_products: tool({
     description:
@@ -212,5 +246,11 @@ export const copperTools: ToolSet = {
       "Check today's stock for a Copper product, for every color or one color, including restock dates for back-ordered ones.",
     inputSchema: checkAvailabilityInput,
     execute: async (input) => checkAvailability(input),
+  }),
+  estimate_shipping: tool({
+    description:
+      "Say when an order for a Copper product (every color or one color) can ship: now if it's in stock, or after the restock date if it's back-ordered. Gives no delivery-day promises.",
+    inputSchema: checkAvailabilityInput,
+    execute: async (input) => estimateShipping(input),
   }),
 };

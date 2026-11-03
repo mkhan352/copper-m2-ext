@@ -26,6 +26,7 @@ const STARTERS = [
   "How much is Copper Home with Copper Plus, paid yearly, for 2 years?",
   "Is Copper Notes in Night Sky in stock?",
   "Is Copper Plus cheaper monthly or yearly?",
+  "When could a Copper Notes in Night Sky ship?",
 ];
 
 type Turn =
