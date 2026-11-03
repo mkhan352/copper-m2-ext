@@ -188,37 +188,58 @@ export async function checkAvailability(
   return { status: "ok", product: product.name, colors };
 }
 
-export type ShippingEstimate =
+export type CompareProductsInput = { first: ProductId; second: ProductId };
+
+export type Comparison =
+  | { status: "same_product"; product: string }
   | {
       status: "ok";
-      product: string;
-      colors: {
-        color: string;
-        ships: "now" | "after_restock";
-        shipsAfter: string | null;
+      products: {
+        name: string;
+        type: string;
+        priceUsd: number;
+        colors: string[];
+        features: string[];
       }[];
-    }
-  | { status: "not_a_color"; product: string; color: string; colors: string[] }
-  | { status: "unavailable"; message: string };
+      cheaper: string | null;
+      priceDifferenceUsd: number;
+      sharedColors: string[];
+    };
+
+export const compareProductsInput: z.ZodType<CompareProductsInput> = z
+  .object({ first: z.enum(PRODUCT_IDS), second: z.enum(PRODUCT_IDS) })
+  .strict();
 
 /**
- * estimate_shipping: when an order for a product color can ship. In stock (or
- * low stock) ships now; back-ordered ships after the next shipment lands. It
- * never promises transit days, because the Product Bible has no such policy.
+ * compare_products: two products side by side (type, price, colors, features),
+ * which is cheaper and by how much, and which colors they share. Catalog only,
+ * so it works even when stock can't be read.
  */
-export async function estimateShipping(
-  input: CheckAvailabilityInput,
-): Promise<ShippingEstimate> {
-  const result = await checkAvailability(input);
-  if (result.status !== "ok") return result;
+export function compareProducts(input: CompareProductsInput): Comparison {
+  const catalog = getProducts();
+  const find = (id: ProductId) => {
+    const product = catalog.find((p) => p.id === id);
+    if (!product) throw new Error(`Unknown product: ${id}`);
+    return product;
+  };
+  const a = find(input.first);
+  const b = find(input.second);
+  if (a.id === b.id) return { status: "same_product", product: a.name };
+
+  const difference = toCents(Math.abs(a.priceUsd - b.priceUsd));
   return {
     status: "ok",
-    product: result.product,
-    colors: result.colors.map(({ color, stock, restockDate }) => ({
-      color,
-      ships: stock === "backordered" ? "after_restock" : "now",
-      shipsAfter: stock === "backordered" ? restockDate : null,
+    products: [a, b].map((p) => ({
+      name: p.name,
+      type: p.type,
+      priceUsd: p.priceUsd,
+      colors: p.colors,
+      features: p.features.map((f) => f.name),
     })),
+    cheaper:
+      difference === 0 ? null : (a.priceUsd < b.priceUsd ? a : b).name,
+    priceDifferenceUsd: difference,
+    sharedColors: a.colors.filter((c) => b.colors.includes(c)),
   };
 }
 
@@ -247,10 +268,10 @@ export const copperTools: ToolSet = {
     inputSchema: checkAvailabilityInput,
     execute: async (input) => checkAvailability(input),
   }),
-  estimate_shipping: tool({
+  compare_products: tool({
     description:
-      "Say when an order for a Copper product (every color or one color) can ship: now if it's in stock, or after the restock date if it's back-ordered. Gives no delivery-day promises.",
-    inputSchema: checkAvailabilityInput,
-    execute: async (input) => estimateShipping(input),
+      "Compare two different Copper products side by side: type, price, colors, features, which is cheaper and by how much, and the colors they share.",
+    inputSchema: compareProductsInput,
+    execute: async (input) => compareProducts(input),
   }),
 };
